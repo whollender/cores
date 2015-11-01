@@ -63,6 +63,11 @@ FlightSimClass FlightSim;
 usb_seremu_class Serial;
 #endif
 
+#ifdef USB_AUDIO
+//usb_seremu_class Serial;
+usb_audio_class Audio;
+#endif
+
 #ifdef JOYSTICK_INTERFACE
 usb_joystick_class Joystick;
 uint8_t usb_joystick_class::manual_mode = 0;

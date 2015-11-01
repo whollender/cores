@@ -48,7 +48,9 @@ static uint32_t usb_buffer_available = 0xFFFFFFFF;
 usb_packet_t * usb_malloc(void)
 {
 	unsigned int n, avail;
-	uint8_t *p;
+	//uint8_t *p;
+	myType *p;
+	//myType *p; // From MM's audio files
 
 	__disable_irq();
 	avail = usb_buffer_available;

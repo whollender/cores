@@ -229,7 +229,8 @@ static void usb_setup(void)
 				p = usb_malloc();
 				if (p) {
 					table[index(i, RX, EVEN)].addr = p->buf;
-					table[index(i, RX, EVEN)].desc = BDT_DESC(64, 0);
+					//table[index(i, RX, EVEN)].desc = BDT_DESC(64, 0);
+					table[index(i, RX, EVEN)].desc = BDT_DESC(MAX_PACKET_BUFFER_SIZE*MAX_PACKET_BUFFER_SAMPLE_SIZE, 0);
 				} else {
 					table[index(i, RX, EVEN)].desc = 0;
 					usb_rx_memory_needed++;
@@ -237,7 +238,8 @@ static void usb_setup(void)
 				p = usb_malloc();
 				if (p) {
 					table[index(i, RX, ODD)].addr = p->buf;
-					table[index(i, RX, ODD)].desc = BDT_DESC(64, 1);
+					//table[index(i, RX, ODD)].desc = BDT_DESC(64, 1);
+					table[index(i, RX, ODD)].desc = BDT_DESC(MAX_PACKET_BUFFER_SIZE*MAX_PACKET_BUFFER_SAMPLE_SIZE, 1);
 				} else {
 					table[index(i, RX, ODD)].desc = 0;
 					usb_rx_memory_needed++;
@@ -257,6 +259,18 @@ static void usb_setup(void)
 		reply_buffer[1] = 0;
 		datalen = 2;
 		data = reply_buffer;
+		break;
+	  case 0x0081: // GET_STATUS (interface)
+		//serial_print("get_stat_i\n");
+		if (setup.wIndex > NUM_INTERFACE) {
+			// TODO: do we need to handle IN vs OUT here?
+			endpoint0_stall();
+			return;
+		}
+		reply_buffer[0] = 0;
+		reply_buffer[1] = 0;
+		data = reply_buffer;
+		datalen = 2;
 		break;
 	  case 0x0082: // GET_STATUS (endpoint)
 		if (setup.wIndex > NUM_ENDPOINTS) {
@@ -278,6 +292,7 @@ static void usb_setup(void)
 			return;
 		}
 		(*(uint8_t *)(&USB0_ENDPT0 + i * 4)) &= ~0x02;
+		//(*(uint8_t *)(&USB0_ENDPT0 + setup.wIndex * 4)) &= ~0x02; // From MM usb_dev.c
 		// TODO: do we need to clear the data toggle here?
 		break;
 	  case 0x0302: // SET_FEATURE (endpoint)
@@ -288,6 +303,7 @@ static void usb_setup(void)
 			return;
 		}
 		(*(uint8_t *)(&USB0_ENDPT0 + i * 4)) |= 0x02;
+		//(*(uint8_t *)(&USB0_ENDPT0 + setup.wIndex * 4)) |= 0x02; // From MM usb_dev.c
 		// TODO: do we need to clear the data toggle here?
 		break;
 	  case 0x0680: // GET_DESCRIPTOR
@@ -364,6 +380,64 @@ static void usb_setup(void)
 	  case 0x0A21: // HID SET_IDLE
 		break;
 	  // case 0xC940:
+#endif
+#if defined (AUDIO_CONTROL_INTERFACE)
+	  case 0x0A81: // GET_INTERFACE
+	  //serial_print("get_int\n");
+		if (setup.wIndex==AUDIO_STREAMING_TX_INTERFACE){
+			reply_buffer[0] = usb_audio_get_alternate_setting_tx();
+			datalen=1;
+			data=reply_buffer;
+		}else if (setup.wIndex==AUDIO_STREAMING_RX_INTERFACE){
+			reply_buffer[0] = usb_audio_get_alternate_setting_rx();
+			datalen=1;
+			data=reply_buffer;
+		}else endpoint0_stall();
+		break;
+	  case 0x0B01: // SET_INTERFACE
+	  //serial_print("set_int:\n");
+		if(setup.wIndex==AUDIO_STREAMING_TX_INTERFACE){
+			usb_audio_set_alternate_setting_tx((uint8_t)setup.wValue);
+			//serial_phex16(setup.wValue);
+			//serial_print(";\n");
+		}else if(setup.wIndex==AUDIO_STREAMING_RX_INTERFACE){
+			usb_audio_set_alternate_setting_rx((uint8_t)setup.wValue);
+			//serial_phex16(setup.wValue);
+			//serial_print(";\n");
+		}else endpoint0_stall();
+		break;
+	 // case 0x0121:
+	 // case 0x0221:
+	 // case 0x0321:
+	  //case 0x0421:
+	 // case 0x0521:
+	  
+	  //case 0x0122:
+	  //case 0x0222:
+	  //case 0x0322:
+	  //case 0x0422:
+	  //case 0x0522:
+	  
+	  //case 0x81A1:
+	 // case 0x82A1:
+	 // case 0x83A1:
+	 // case 0x84A1:
+	 // case 0x85A1:
+	  
+	  case 0x81A2:
+	  case 0x82A2:
+	  case 0x83A2:
+	  case 0x84A2:
+		//serial_print("get_sam_freq_ctl\n");
+		// TODO : differentiate between TX sampling rate and RX sampling rate, right now they MUST be the same
+		if (setup.wValue = 0x01){ 	//GET_SAMPLING_FREQ_CONTROL
+			reply_buffer[0] = AUDIO_TX_SAMPLING_RATE_MSB;
+			reply_buffer[1] = AUDIO_TX_SAMPLING_RATE_MID;
+			reply_buffer[2] = AUDIO_TX_SAMPLING_RATE_LSB;
+			data = reply_buffer;
+			datalen = 3;
+		}else endpoint0_stall();
+	  //case 0x85A2:
 #endif
 	  default:
 		endpoint0_stall();
@@ -561,6 +635,10 @@ usb_packet_t *usb_rx(uint32_t endpoint)
 		rx_first[endpoint] = ret->next;
 		usb_rx_byte_count_data[endpoint] -= ret->len;
 	}
+
+	// IN MM's usb files, this if statement looks like this:
+	//if (ret) rx_first[endpoint] = ret->next;
+	//usb_rx_byte_count_data[endpoint] -= ret->len;
 	__enable_irq();
 	//serial_print("rx, epidx=");
 	//serial_phex(endpoint);
@@ -634,7 +712,8 @@ void usb_rx_memory(usb_packet_t *packet)
 		if (*cfg++ & USB_ENDPT_EPRXEN) {
 			if (table[index(i, RX, EVEN)].desc == 0) {
 				table[index(i, RX, EVEN)].addr = packet->buf;
-				table[index(i, RX, EVEN)].desc = BDT_DESC(64, 0);
+				//table[index(i, RX, EVEN)].desc = BDT_DESC(64, 0);
+				table[index(i, RX, EVEN)].desc = BDT_DESC(MAX_PACKET_BUFFER_SIZE*MAX_PACKET_BUFFER_SAMPLE_SIZE, 0);
 				usb_rx_memory_needed--;
 				__enable_irq();
 				//serial_phex(i);
@@ -643,7 +722,8 @@ void usb_rx_memory(usb_packet_t *packet)
 			}
 			if (table[index(i, RX, ODD)].desc == 0) {
 				table[index(i, RX, ODD)].addr = packet->buf;
-				table[index(i, RX, ODD)].desc = BDT_DESC(64, 1);
+				//table[index(i, RX, ODD)].desc = BDT_DESC(64, 1);
+				table[index(i, RX, ODD)].desc = BDT_DESC(MAX_PACKET_BUFFER_SIZE*MAX_PACKET_BUFFER_SAMPLE_SIZE, 1);
 				usb_rx_memory_needed--;
 				__enable_irq();
 				//serial_phex(i);
@@ -730,6 +810,7 @@ void usb_isr(void)
 	restart:
 	status = USB0_ISTAT;
 
+	//if ((status & USB_INTEN_SOFTOKEN /* 04 */ )) { // From MM's USB files
 	if ((status & USB_ISTAT_SOFTOK /* 04 */ )) {
 		if (usb_configuration) {
 			t = usb_reboot_timer;
@@ -757,7 +838,16 @@ void usb_isr(void)
 #ifdef FLIGHTSIM_INTERFACE
 			usb_flightsim_flush_callback();
 #endif
+#ifdef AUDIO_CONTROL_INTERFACE
+			audio_SOF_signal = 1;
+			t = usb_audio_transmit_flush_timer;
+			if (t) {
+				usb_audio_transmit_flush_timer = --t;
+				if (t == 0) usb_audio_flush_callback();
+			}
+#endif
 		}
+		//USB0_ISTAT = USB_INTEN_SOFTOKEN; // From MM's USB files
 		USB0_ISTAT = USB_ISTAT_SOFTOK;
 	}
 
@@ -809,6 +899,10 @@ void usb_isr(void)
 					  default:
 						break;
 					}
+					#ifdef AUDIO_STREAMING_TX_INTERFACE
+					if (endpoint==1) b->desc = BDT_DESC(packet->len, DATA0);  //endpoint 1 is audio streaming endpoint, for isochronous endpoints you don't toggle between data0 and data1 PIDs
+					else 
+					#endif
 					b->desc = BDT_DESC(packet->len, ((uint32_t)b & 8) ? DATA1 : DATA0);
 				} else {
 					//serial_print("tx no packet\n");
@@ -856,7 +950,8 @@ void usb_isr(void)
 					packet = usb_malloc();
 					if (packet) {
 						b->addr = packet->buf;
-						b->desc = BDT_DESC(64, ((uint32_t)b & 8) ? DATA1 : DATA0);
+						//b->desc = BDT_DESC(64, ((uint32_t)b & 8) ? DATA1 : DATA0);
+						b->desc = BDT_DESC(MAX_PACKET_BUFFER_SIZE*MAX_PACKET_BUFFER_SAMPLE_SIZE, ((uint32_t)b & 8) ? DATA1 : DATA0);
 					} else {
 						//serial_print("starving ");
 						//serial_phex(endpoint + 1);
@@ -865,7 +960,8 @@ void usb_isr(void)
 						usb_rx_memory_needed++;
 					}
 				} else {
-					b->desc = BDT_DESC(64, ((uint32_t)b & 8) ? DATA1 : DATA0);
+					//b->desc = BDT_DESC(64, ((uint32_t)b & 8) ? DATA1 : DATA0);
+					b->desc = BDT_DESC(MAX_PACKET_BUFFER_SIZE*MAX_PACKET_BUFFER_SAMPLE_SIZE, ((uint32_t)b & 8) ? DATA1 : DATA0);
 				}
 			}
 
@@ -966,6 +1062,7 @@ void usb_init(void)
 	MPU_RGDAAC0 |= 0x03000000;
 #endif
 
+	// This isn't commeted out in MM's usb files for some reason
 	// reset USB module
 	//USB0_USBTRC0 = USB_USBTRC_USBRESET;
 	//while ((USB0_USBTRC0 & USB_USBTRC_USBRESET) != 0) ; // wait for reset to end
